@@ -37,4 +37,10 @@ module Commands
   class DeleteTask < CommandFromActor
     attribute :task_id, String
   end
+
+  class CommentOnTask < CommandFromActor
+    attribute :id, String
+    attribute :task_id, String
+    attribute :body, String
+  end
 end

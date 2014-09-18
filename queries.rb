@@ -18,4 +18,8 @@ module Queries
   class FindTask < QueryFromActor
     attribute :id, String
   end
+
+  class CommentsForTask < QueryFromActor
+    attribute :task_id, String
+  end
 end

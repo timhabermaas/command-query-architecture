@@ -49,6 +49,14 @@ module DTOs
     attribute :created_by, String
     attribute :invited_users, Array[String]
   end
+
+  class Comment
+    include Virtus.model
+
+    attribute :id, String
+    attribute :body, String
+    attribute :task_id, String
+  end
 end
 
 class AccountService
@@ -75,6 +83,26 @@ class AccountService
       @memory.find(query.id)
     else
       raise "can't answer it"
+    end
+  end
+end
+
+class CommentService
+  def initialize(memory)
+    @memory = memory
+  end
+
+  def handle(command)
+    case command
+    when Commands::CommentOnTask
+      @memory.save DTOs::Comment.new(id: command.id, created_by: command.actor_id, body: command.body, task_id: command.task_id)
+    end
+  end
+
+  def answer(query)
+    case query
+    when Queries::CommentsForTask
+      @memory.all.select { |c| c.task_id == query.task_id }
     end
   end
 end
@@ -116,6 +144,7 @@ class App
   def initialize
     @account_service = AccountService.new(Persistence.new)
     @task_service = TaskService.new(Persistence.new)
+    @comment_service = CommentService.new(Persistence.new)
   end
 
   def handle(command)
@@ -148,7 +177,8 @@ class App
                                   Policies::OrPolicy.new([
                                     Policies::Admin.new(@account_service),
                                     Policies::TaskOwner.new(@task_service, :task_id)]),
-                                  @task_service)
+                                  @task_service),
+        Commands::CommentOnTask => @comment_service
       }
       result = {}
       handlers.each do |klass, handler|
@@ -160,7 +190,8 @@ class App
     def handler_for_query(klass)
       {
         Queries::FindUser => @account_service,
-        Queries::TasksForUser => @task_service
+        Queries::TasksForUser => @task_service,
+        Queries::CommentsForTask => @comment_service
       }[klass]
     end
 end
@@ -172,15 +203,22 @@ app.handle Commands::RegisterUser.new(name: "tim", id: user_id)
 app.handle Commands::RegisterUser.new(name: "peter", id: user_2_id)
 task_id = SecureRandom.uuid
 task_2_id = SecureRandom.uuid
-app.handle Commands::CreateTask.new(id: task_id, title: "Some title", actor_id: user_id)
+app.handle Commands::CreateTask.new(id: task_id, title: "Clean up kitchen", actor_id: user_id)
+app.handle Commands::CreateTask.new(id: SecureRandom.uuid, title: "Clean up garage", actor_id: user_id)
 app.handle Commands::CreateTask.new(id: task_2_id, title: "Some other title", actor_id: user_2_id)
 app.handle Commands::InviteUserToTask.new(user_id: user_id, task_id: task_2_id, actor_id: user_2_id)
+
+app.handle Commands::CommentOnTask.new(task_id: task_id, id: SecureRandom.uuid, body: "I made a comment", actor_id: user_id)
 
 # We need to skip the app, because no one is admin yet.
 app.account_service.handle Commands::MakeAdmin.new(user_id: user_id)
 app.handle Commands::DeleteTask.new(task_id: task_2_id, actor_id: user_2_id)
 
+def comments_count(app, task_id)
+  app.answer(Queries::CommentsForTask.new(task_id: task_id)).size
+end
+
 puts
 puts "My tasks:"
 puts "-----"
-puts app.answer(Queries::TasksForUser.new(user_id: user_id)).map { |t| "* #{t.id[0..5]} | #{t.title}" }.join("\n")
+puts app.answer(Queries::TasksForUser.new(user_id: user_id)).map { |t| "* #{t.id[0..5]} | #{t.title} | #{comments_count(app, t.id)}" }.join("\n")
